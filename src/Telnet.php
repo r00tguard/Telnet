@@ -180,6 +180,12 @@ class Telnet
                 $prompt_reg = '[%>#]';
                 break;
 
+            case 'hpcomware':  // HP Comware OS
+                $user_prompt = 'login:';
+                $pass_prompt = 'Password:';
+                $prompt_reg = '[>\]]';
+                break;
+                
             case 'alaxala': // AlaxalA, HITACHI
                 $user_prompt = 'login:';
                 $pass_prompt = 'Password:';
@@ -301,7 +307,11 @@ class Telnet
 
         // clear the buffer
         $this->clearBuffer();
-
+        
+        // initialize promptFound flag and temporary buffer
+        $promptFound = false;
+        $tempBuffer="";
+        
         $until_t = time() + $this->timeout;
         do {
             // time's up (loop can be exited at end or through continue!)
@@ -315,7 +325,13 @@ class Telnet
                 if (empty($prompt)) {
                     return self::TELNET_OK;
                 }
-                throw new \Exception("Couldn't find the requested : '" . $prompt . "', it was not in the data returned from server: " . $this->buffer);
+            // if a prompt is received on earlier iterations return success, else throw exception.
+                if($promptFound) { 
+                    $this->buffer .= $tempBuffer;
+                    $tempBuffer="";
+                    return self::TELNET_OK;
+                }
+                else throw new \Exception("Couldn't find the requested : '" . $prompt . "', it was not in the data returned from server: " . $this->buffer);
             }
 
             // Interpreted As Command
@@ -325,12 +341,21 @@ class Telnet
                 }
             }
 
-            // append current char to global buffer
-            $this->buffer .= $c;
+            // Discard unprintable characters except line feed
+            if (ord($c) < 32 && ord($c)!=10) continue;
+            
+            // append current char to global buffer if prompt is not found yet, else put char to temporary buffer
+            if(!$promptFound) $this->buffer .= $c; else $tempBuffer .= $c;
 
-            // we've encountered the prompt. Break out of the loop
-            if (!empty($prompt) && preg_match("/{$prompt}$/", $this->buffer)) {
-                return self::TELNET_OK;
+            // the data may contain multiple prompt characters so break out of the loop only if data flow stops.
+            if (!empty($prompt))
+            {
+                if($promptFound)
+                    if(preg_match("/{$prompt}$/", $tempBuffer))
+                    { $this->buffer .= $tempBuffer; $tempBuffer=""; }
+                else
+                    if(preg_match("/{$prompt}$/", $this->buffer))
+                      $promptFound = true;
             }
 
         } while ($c != $this->NULL || $c != $this->DC1);
